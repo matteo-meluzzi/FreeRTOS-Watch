@@ -3,6 +3,7 @@
 
 #include <LilyGoWatch.h>
 #include <TTGO.h>
+#include <pthread.h>
 
 #include "config.h"
 
@@ -47,10 +48,42 @@ void sleep_until_display_or_button_is_pressed()
   esp_light_sleep_start();
 }
 
+uint16_t rgb565(uint8_t red, uint8_t green, uint8_t blue) {
+  return ((red & 0b00011111000) << 8) | ((green & 0b00011111100) << 3) | (blue >> 3);
+}
+
+void draw_hour_ticks(TFT_eSPI *tft, uint8_t cx, uint8_t cy, uint8_t r1, uint8_t r2, uint16_t color) {
+  for (uint16_t h = 0; h < 12; h++) {
+    tft->drawTick(cx, cy, r1, r2, h * 30.0, color);
+  }
+}
+
+void draw_minute_ticks(TFT_eSPI *tft, uint8_t cx, uint8_t cy, uint8_t r1, uint8_t r2, uint16_t color) {
+  for (uint16_t m = 0; m < 60; m++) {
+    tft->drawTick(cx, cy, r1, r2, m * 6.0, color);
+  }
+}
+
 void draw_watch(TFT_eSPI *tft) {
-  tft->drawCircle(120, 120, 119, TFT_RED);
-  //tft->drawLine(0, 0, 240, 240, TFT_BLUE);
-  tft->drawThickLine(0, 0, 240, 240, 5, TFT_BLUE);
+  draw_minute_ticks(tft, 120, 120, 117, 107, rgb565(128, 128, 128));
+  draw_hour_ticks(tft, 120, 120, 117, 90, rgb565(128, 128, 128));
+
+  double second = 45.0;
+  double minute = 15.0;
+  double hour = 11.0;
+
+  // hours
+  tft->drawThickTick(120, 120, 0, 16, 360.0 / 12.0 * (1.0 * hour + minute / 60.0), 1, rgb565(255, 255, 255));
+  tft->drawThickTick(120, 120, 16, 60, 360.0 / 12.0 * (1.0 * hour + minute / 60.0), 4, rgb565(255, 255, 255));
+
+  // minutes
+  tft->drawThickTick(120, 120, 0, 16, 360.0 / 60.0 * (1.0 * minute + second / 60.0), 1, rgb565(255, 255, 255));
+  tft->drawThickTick(120, 120, 16, 105, 360.0 / 60.0 * (1.0 * minute + second / 60.0), 4, rgb565(255, 255, 255));
+  
+  // seconds
+  tft->fillCircle(120, 120, 3, rgb565(255, 0, 0));
+  tft->drawThickTick(120, 120, 0, 16, 360.0 / 60.0 * second, 1, rgb565(255, 0, 0));
+  tft->drawThickTick(120, 120, 0, 110, 360.0 / 60.0 * second, 1, rgb565(255, 0, 0));
 }
 
 void loop()
@@ -58,33 +91,40 @@ void loop()
   Serial.println("loop");
 
   watch->tft->begin();
+  watch->openBL();
   watch->tft->fillScreen(TFT_BLACK);
 
-  watch->openBL();
+  Serial.println("draw_watch");
+  draw_watch(watch->tft);
 
+  Serial.println("Matteo genius");
   watch->tft->setCursor(0, 0);
   watch->tft->setTextSize(3);
   watch->tft->println("Matteo genius");
 
-  draw_watch(watch->tft);
-
+  Serial.println("for (;;)");
   for (;;) {
     if (irq_axp) {
+      Serial.println("irq_axp is true");
       irq_axp = false;
       watch->power->readIRQ();
       
       if (watch->power->isPEKLongPressIRQ()) {
         watch->power->clearIRQ();
+        Serial.println("a long press");
         break;
       }
+      Serial.println("not a long press");
       watch->power->clearIRQ();
     }
     // uncomment to have the watch sleep after 5 seconds
-    // if (xTaskGetTickCount() - last_woke_up_ticks >= 5000) { 
-    //   break;
-    // }
+    if (xTaskGetTickCount() - last_woke_up_ticks >= 5000) { 
+      break;
+    }
+    sleep(1);
   }
 
+  Serial.println("go to sleep");
   sleep_until_display_or_button_is_pressed();
   irq_axp = false;
   watch->power->clearIRQ();

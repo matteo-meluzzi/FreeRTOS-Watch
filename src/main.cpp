@@ -15,26 +15,21 @@ TTGOClass *watch;
 
 SemaphoreHandle_t button_semaphore = NULL;
 StaticSemaphore_t button_semaphore_buffer;
+button_statefp button_state = not_pressed;
+typedef voidfp (* watch_statefp)(button_statefp button_pressed);
 
-TickType_t last_woke_up_ticks = 0;
+SemaphoreHandle_t touch_semaphore = NULL;
+StaticSemaphore_t touch_semaphore_buffer;
 
-struct WatchState {
-  button_statefp button = not_pressed;
-};
-WatchState watch_state;
-typedef voidfp (* watch_statefp)(WatchState state);
-
-void read_button_task(void *args)
-{
-  for (;;) {
-    Serial.println("reading button")
-  }
-}
+void read_button_task(void *args);
+void read_touch_task(void *args);
 
 void setup()
 {
   button_semaphore = xSemaphoreCreateBinaryStatic(&button_semaphore_buffer);
   assert(button_semaphore);
+  touch_semaphore = xSemaphoreCreateBinaryStatic(&touch_semaphore_buffer);
+  assert(touch_semaphore);
 
   Serial.begin(115200);
   Serial.println("Hi!");
@@ -50,7 +45,7 @@ void setup()
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
     xSemaphoreGiveFromISR(button_semaphore, &xHigherPriorityTaskWoken);
 
-    Serial.println("change");
+    // Serial.println("button state change");
   }, FALLING);
 
   // set touch panel in interrupt polling mode
@@ -59,15 +54,19 @@ void setup()
   watch->touch->disableINT(); 
   pinMode(TOUCH_INT, INPUT);
   attachInterrupt(TOUCH_INT, [] {
-    Serial.print("touched: ");
-    Serial.println(digitalRead(TOUCH_INT));
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    xSemaphoreGiveFromISR(touch_semaphore, &xHigherPriorityTaskWoken);
+
+    // Serial.print("touched: ");
+    // Serial.println(digitalRead(TOUCH_INT));
   }, CHANGE);
 
   watch->power->enableIRQ(AXP202_PEK_FALLING_EDGE_IRQ, true);
   watch->power->enableIRQ(AXP202_PEK_RISING_EDGE_IRQ, true);
   watch->power->clearIRQ();
 
-  last_woke_up_ticks = xTaskGetTickCount();
+  xTaskCreate(read_button_task, "read_button_task", 1024, NULL, 1, NULL);
+  xTaskCreate(read_touch_task, "read_touch_task", 1024, NULL, 1, NULL);
 }
 
 void sleep_until_display_or_button_is_pressed() 
@@ -84,13 +83,39 @@ void sleep_until_display_or_button_is_pressed()
   esp_light_sleep_start();
 }
 
-void update_button_pressed() {
-  watch->power->readIRQ();
+void read_touch_task(void *args)
+{
+  for (;;) {
+    if (xSemaphoreTake(touch_semaphore, portMAX_DELAY) == pdTRUE) {
+      Serial.print("touched: ");
+      Serial.println(watch->touch->getTouched());
+    }
+  }
+}
 
-  bool is_long = watch->power->isPEKLongPressIRQ();
-  bool is_short = watch->power->isPEKShortPressIRQ();
-  
-  watch_state.button = (button_statefp) watch_state.button(is_long, is_short);
+void read_button_task(void *args)
+{
+  for (;;) {
+    if (xSemaphoreTake(button_semaphore, portMAX_DELAY) == pdTRUE) { 
+      watch->power->readIRQ();
+
+      bool is_long = watch->power->isPEKLongPressIRQ();
+      bool is_short = watch->power->isPEKShortPressIRQ();
+      
+      button_state = (button_statefp) button_state(is_long, is_short);
+
+      Serial.print("Button state: ");
+      if (button_state == not_pressed) {
+        Serial.println("not pressed");
+      } else if (button_state == pressed) {
+        Serial.println("pressed");
+      } else {
+        Serial.println("long pressed");
+      }
+
+      watch->power->clearIRQ();
+    }
+  }
 }
 
 void loop()
@@ -110,113 +135,26 @@ void loop()
   watch->tft->println("Matteo genius");
 
   Serial.println("for (;;)");
-  assert(button_semaphore);
   for (;;) {
-    if (xSemaphoreTake(button_semaphore, portMAX_DELAY) == pdTRUE) { 
-      update_button_pressed();
+    delay(1000);
+    // if (xSemaphoreTake(button_semaphore, portMAX_DELAY) == pdTRUE) { 
+    //   update_button_pressed();
 
-      Serial.print("Button state: ");
-      if (watch_state.button == not_pressed) {
-        Serial.println("not pressed");
-      } else if (watch_state.button == pressed) {
-        Serial.println("pressed");
-      } else {
-        Serial.println("long pressed");
-      }
+    //   Serial.print("Button state: ");
+    //   if (watch_state.button == not_pressed) {
+    //     Serial.println("not pressed");
+    //   } else if (watch_state.button == pressed) {
+    //     Serial.println("pressed");
+    //   } else {
+    //     Serial.println("long pressed");
+    //   }
 
-      watch->power->clearIRQ();
-    }
+    //   watch->power->clearIRQ();
+    // }
   }
 
   Serial.println("go to sleep");
   sleep_until_display_or_button_is_pressed();
 
   watch->power->clearIRQ();
-  last_woke_up_ticks = xTaskGetTickCount();
 }
-
-
-
-
-/*
-
-
-#define LILYGO_WATCH_2020_V1
-
-#include <LilyGoWatch.h>
-#include <TTGO.h>
-
-#include "config.h"
-
-TTGOClass *watch;
-
-bool irq_axp = false;
-
-void setup()
-{
-  Serial.begin(115200);
-  Serial.println("Hi!");
-  // Get TTGOClass instance
-  watch = TTGOClass::getWatch();
-
-  // Initialize the hardware, the BMA423 sensor has been initialized internally
-  watch->begin();
-
-  // Turn on the backlight
-  watch->openBL();
-
-  pinMode(AXP202_INT, INPUT_PULLUP);
-  attachInterrupt(AXP202_INT, [] {
-    irq_axp = true;
-    Serial.println("irq_axp = true");
-  }, FALLING);
-  watch->power->enableIRQ(AXP202_PEK_SHORTPRESS_IRQ, true);
-  watch->power->clearIRQ();
-}
-
-void sleep_until_display_is_pressed() {
-  watch->power->clearIRQ();
-
-  // Set screen and touch to sleep mode
-  watch->displaySleep();
-  watch->bl->off();
-
-  esp_sleep_enable_ext0_wakeup((gpio_num_t)AXP202_INT, LOW);
-  // esp_sleep_enable_ext1_wakeup(GPIO_SEL_35, ESP_EXT1_WAKEUP_ALL_LOW);
-
-  esp_light_sleep_start();
-  irq_axp = false;
-  watch->power->clearIRQ();
-  Serial.println("irq_axp = false");
-}
-
-void loop()
-{
-  Serial.println("loop");
-
-  watch->tft->begin();
-  watch->tft->setCursor(0, 0);
-  watch->tft->fillScreen(TFT_BLACK);
-
-  watch->openBL();
-
-  watch->tft->println("Wait for the PEKKey interrupt to come...");
-  Serial.println("Wait for the PEKKey interrupt to come");
-
-  // Wait for the power button to be pressed
-  while (!irq_axp) {
-    Serial.println(xTaskGetTickCount());
-    sleep(1);
-  }
-  Serial.println("Button pressed");
-
-  sleep_until_display_is_pressed();
-}
-
-
-
-
-
-
-
-*/

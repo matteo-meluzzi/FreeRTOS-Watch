@@ -5,13 +5,12 @@
 #include <LilyGoWatch.h>
 #include <TTGO.h>
 #include <freertos/semphr.h>
+#include <WiFi.h>
+#include <pthread.h>
 
 #include "config.h"
 
 #include "draw_watch.h"
-#include "button_state.h"
-
-#include <pthread.h>
 
 TTGOClass *watch;
 pthread_mutex_t watch_mutex;
@@ -21,7 +20,6 @@ void wake_up();
 TickType_t last_woke_up_ticks = 0;
 
 SemaphoreHandle_t button_semaphore = NULL;
-button_statefp button_state = not_pressed;
 
 SemaphoreHandle_t touch_semaphore = NULL;
 
@@ -79,34 +77,35 @@ struct PingPongApp: App {
 PingPongApp ping_pong_app = {};
 
 void WatchApp::setup() {
+  pthread_mutex_lock(&watch_mutex);
+  watch->tft->fillScreen(TFT_BLACK);
+  pthread_mutex_unlock(&watch_mutex);
   this->update();
 }
 
 void WatchApp::on_touch_down(uint16_t x, uint16_t y) {
-  Serial.print("Touch Down: ");
-  Serial.print(x);
-  Serial.print(" ");
-  Serial.println(y);
+  // Serial.print("Touch Down: ");
+  // Serial.print(x);
+  // Serial.print(" ");
+  // Serial.println(y);
 }
 
 void WatchApp::on_touch_up(uint16_t x, uint16_t y) {
-  Serial.print("Touch Up: ");
-  Serial.print(x);
-  Serial.print(" ");
-  Serial.println(y);
-  if (xTaskGetTickCount() - last_woke_up_ticks > 250) {
-    Serial.println("Going to sleep. Bye!");
-    sleep_until_display_or_button_is_pressed();
-  }
+  // Serial.print("Touch Up: ");
+  // Serial.print(x);
+  // Serial.print(" ");
+  // Serial.println(y);
+  // Serial.println("Going to sleep. Bye!");
+  sleep_until_display_or_button_is_pressed();
 }
 
 void WatchApp::on_button_up() {
-  Serial.println("Button up");
+  // Serial.println("Button up");
   set_current_app(&ping_pong_app);
 }
 
 void WatchApp::on_button_long_press() {
-  Serial.println("Button long");
+  // Serial.println("Button long");
 }
 
 void WatchApp::update() {
@@ -157,10 +156,12 @@ void PingPongApp::on_touch_up(uint16_t x, uint16_t y) {
 }
 
 void PingPongApp::on_button_up() {
+  // Serial.println("Button up");
   set_current_app(&watch_app);
 }
 
 void PingPongApp::on_button_long_press() {
+  // Serial.println("Button long");
 }
 
 void PingPongApp::update() {}
@@ -170,8 +171,18 @@ void read_touch_task(void *args);
 
 esp_timer_handle_t one_second_timer;
 void every_second(void *arg) {
+  // static int c = 0;
+  // Serial.print("timer fired ");
+  // Serial.println(c++);
   current_app->update();
 }
+
+const char *ssid            = "room 12.4 rules";
+const char *password        = "cocongo72";
+
+const char *ntpServer       = "pool.ntp.org";
+const long  gmtOffset_sec   = 3600;
+const int   daylightOffset_sec = 3600;
 
 void setup()
 {
@@ -188,8 +199,6 @@ void setup()
 
   Serial.begin(115200);
   Serial.println("Hi!");
-  // Serial.println(sizeof(voidfp));
-  // Serial.println(sizeof(std::function<void(void)>));
 
   // Get TTGOClass instance
   watch = TTGOClass::getWatch();
@@ -197,6 +206,36 @@ void setup()
   // Initialize the hardware, the BMA423 sensor has been initialized internally
   watch->begin();
   watch->bl->adjust(255);
+
+  watch->tft->print("connecting to the wifi");
+  WiFi.begin(ssid, password);
+  int count = 0;
+  while (WiFi.status() != WL_CONNECTED && count++ < 20) {
+      delay(500);
+      Serial.print(".");
+  }
+  Serial.print("\nConnected: ");
+  Serial.println(WiFi.status() == WL_CONNECTED);
+  watch->tft->setCursor(0, 0);
+  watch->tft->println("                      ");
+  watch->tft->setCursor(0, 0);
+
+  if (WiFi.status() == WL_CONNECTED) {
+    configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+    
+    watch->tft->println("obtaining time from the internet");
+
+    struct tm timeinfo;
+    while (!getLocalTime(&timeinfo)) {
+        Serial.println("Failed to obtain time");
+        delay(100);
+    }
+    Serial.println(&timeinfo, "%A, %B %d %Y %H:%M:%S");
+
+    watch->rtc->syncToRtc();
+  }
+  WiFi.disconnect(true, false);
+
 
   pinMode(AXP202_INT, INPUT_PULLUP);
   attachInterrupt(AXP202_INT, [] {
@@ -264,14 +303,22 @@ void read_button_task(void *args)
       watch->power->clearIRQ();
       pthread_mutex_unlock(&watch_mutex);
 
-      button_statefp old_state = button_state;
-      button_state = (button_statefp) button_state(is_long, is_short);
+      // button_statefp old_state = button_state;
+      // button_state = (button_statefp) button_state(is_long, is_short);
 
-      if (button_state == not_pressed && old_state == pressed) {
+      // if (button_state == pressed) {
+      //   Serial.println("button pressed");
+      // } else if (button_state == not_pressed) {
+      //   Serial.println("button released");
+      // } else if (button_state == pressed_long) {
+      //   Serial.println("button pressed long");
+      // }
+
+      if (is_short) {
         Event e = {BUTTON_UP_EVENT, 0, 0};
         xQueueSendToBack(event_queue, (const void *) &e, (TickType_t) 0);
       }
-      else if (button_state == pressed_long && old_state == pressed) {
+      else if (is_long) {
         Event e = {BUTTON_LONG_PRESS_EVENT, 0, 0};
         xQueueSendToBack(event_queue, (const void *) &e, (TickType_t) 0);
       } 
@@ -281,13 +328,14 @@ void read_button_task(void *args)
 
 void loop()
 {
-  Serial.println("loop");
+  // Serial.println("loop");
   wake_up();
 
   for (;;) {
     Event event;
     // Serial.println("waiting for event");
-    if (xQueueReceive(event_queue, &event, portMAX_DELAY) == pdTRUE) {
+
+    if (xQueueReceive(event_queue, &event, portMAX_DELAY) == pdTRUE && xTaskGetTickCount() - last_woke_up_ticks > 200) {
       //event.action(event.param1, event.param2);
       switch (event.type)
       {
@@ -331,12 +379,16 @@ void sleep_until_display_or_button_is_pressed()
   watch->powerOff();
   watch->bl->off();
 
+  esp_timer_stop(one_second_timer);
+
   esp_sleep_enable_ext0_wakeup((gpio_num_t) AXP202_INT, LOW);
   esp_sleep_enable_ext1_wakeup(GPIO_SEL_38, ESP_EXT1_WAKEUP_ALL_LOW);
 
   esp_light_sleep_start();
 
   watch->power->clearIRQ();
+
+  ESP_ERROR_CHECK(esp_timer_start_periodic(one_second_timer, 1000000));
 
   pthread_mutex_unlock(&watch_mutex);
 

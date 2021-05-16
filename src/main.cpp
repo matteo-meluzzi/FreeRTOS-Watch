@@ -14,64 +14,41 @@
 #include <pthread.h>
 
 TTGOClass *watch;
+pthread_mutex_t watch_mutex;
 
 void sleep_until_display_or_button_is_pressed();
 
-struct WatchInput {
-  bool button_down = false;
-  bool button_up_short = false;
-  bool button_up_long = false;
-  bool touch_press_down = false;
-  bool touch_press_up = false;
-};
-typedef voidfp (* watch_statefp)(WatchInput *watch_input);
-voidfp off(WatchInput *watch_input);
-voidfp show_time(WatchInput *watch_input);
-voidfp show_time_pressing(WatchInput *watch_input);
-
-voidfp off(WatchInput *watch_input) {
-  return (voidfp) show_time;
-}
-voidfp show_time(WatchInput *watch_input) {
-  if (watch_input->touch_press_up) return (voidfp) off;
-  if (watch_input->button_down) return (voidfp) show_time_pressing;
-
-  return (voidfp) show_time;
-}
-voidfp show_time_pressing(WatchInput *watch_input) {
-  if (watch_input->button_up_long) return (voidfp) off;
-  if (watch_input->button_up_short) return (voidfp) show_time;
-
-  return (voidfp) show_time_pressing;
-}
-
-watch_statefp watch_state = show_time;
-
-WatchInput watch_input;
-pthread_mutex_t watch_input_mutex;
-pthread_cond_t watch_input_cond;
-
 SemaphoreHandle_t button_semaphore = NULL;
-StaticSemaphore_t button_semaphore_buffer;
 button_statefp button_state = not_pressed;
 
 SemaphoreHandle_t touch_semaphore = NULL;
-StaticSemaphore_t touch_semaphore_buffer;
+
+QueueHandle_t event_queue = NULL;
+typedef void (* eventfp)(uint16_t, uint16_t);
+struct Event {
+  eventfp action;
+  uint16_t param1;
+  uint16_t param2;
+};
 
 void read_button_task(void *args);
 void read_touch_task(void *args);
 
 void setup()
 {
-  button_semaphore = xSemaphoreCreateBinaryStatic(&button_semaphore_buffer);
+  ESP_ERROR_CHECK(pthread_mutex_init(&watch_mutex, NULL));
+  button_semaphore = xSemaphoreCreateBinary();
   assert(button_semaphore);
-  touch_semaphore = xSemaphoreCreateBinaryStatic(&touch_semaphore_buffer);
+  touch_semaphore = xSemaphoreCreateBinary();
   assert(touch_semaphore);
-  assert(!pthread_mutex_init(&watch_input_mutex, NULL));
-  assert(!pthread_cond_init(&watch_input_cond, NULL));
+  event_queue = xQueueCreate(25, sizeof(Event));
+  assert(event_queue);
 
   Serial.begin(115200);
   Serial.println("Hi!");
+  // Serial.println(sizeof(voidfp));
+  // Serial.println(sizeof(std::function<void(void)>));
+
   // Get TTGOClass instance
   watch = TTGOClass::getWatch();
 
@@ -108,8 +85,109 @@ void setup()
   xTaskCreate(read_touch_task, "read_touch_task", 1024, NULL, 1, NULL);
 }
 
+void on_touch_down(uint16_t x, uint16_t y) {
+  Serial.print("Touch Down: ");
+  Serial.print(x);
+  Serial.print(" ");
+  Serial.println(y);
+}
+
+void on_touch_up(uint16_t x, uint16_t y) {
+  Serial.print("Touch Up: ");
+  Serial.print(x);
+  Serial.print(" ");
+  Serial.println(y);
+}
+
+void on_button_up(uint16_t x, uint16_t y) {
+  Serial.println("Button up");
+}
+
+void on_button_long_press(uint16_t x, uint16_t y) {
+  Serial.println("Button up long");
+}
+
+void read_touch_task(void *args)
+{
+  for (;;) {
+    if (xSemaphoreTake(touch_semaphore, portMAX_DELAY) == pdTRUE) {
+      pthread_mutex_lock(&watch_mutex);
+
+      bool touched = watch->touch->getTouched();
+      uint16_t x, y;
+      watch->touch->getPoint(x, y);
+
+      pthread_mutex_unlock(&watch_mutex);
+
+      eventfp action = touched ? on_touch_down : on_touch_up; // queue copies whatever is in tmp (the address of on_touch_down)
+      Event e = {action, x, y};
+      xQueueSendToBack(event_queue, (const void *) &e, (TickType_t) 0);
+    }
+  }
+}
+
+void read_button_task(void *args)
+{
+  for (;;) {
+    if (xSemaphoreTake(button_semaphore, portMAX_DELAY) == pdTRUE) {
+      pthread_mutex_lock(&watch_mutex);
+      watch->power->readIRQ();
+
+      bool is_long = watch->power->isPEKLongPressIRQ();
+      bool is_short = watch->power->isPEKShortPressIRQ();
+
+      watch->power->clearIRQ();
+      pthread_mutex_unlock(&watch_mutex);
+
+      button_statefp old_state = button_state;
+      button_state = (button_statefp) button_state(is_long, is_short);
+
+      if (button_state == not_pressed && old_state == pressed) {
+        Event e = {on_button_up, 0, 0};
+        xQueueSendToBack(event_queue, (const void *) &e, (TickType_t) 0);
+      }
+      else if (button_state == pressed_long && old_state == pressed) {
+        Event e = {on_button_long_press, 0, 0};
+        xQueueSendToBack(event_queue, (const void *) &e, (TickType_t) 0);
+      } 
+    }
+  }
+}
+
+void loop()
+{
+  Serial.println("loop");
+
+  pthread_mutex_lock(&watch_mutex);
+  watch->tft->begin();
+  watch->openBL();
+  watch->tft->fillScreen(TFT_BLACK);
+
+  Serial.println("draw_watch");
+  draw_watch(watch->tft);
+
+  Serial.println("Matteo genius");
+  watch->tft->setCursor(0, 0);
+  watch->tft->setTextSize(3);
+  watch->tft->println("Matteo genius");
+  pthread_mutex_unlock(&watch_mutex);
+
+  for (;;) {
+    Event event;
+    Serial.println("waiting for event");
+    if (xQueueReceive(event_queue, &event, portMAX_DELAY) == pdTRUE) {
+      event.action(event.param1, event.param2);
+    }
+  }
+
+  Serial.println("go to sleep");
+  sleep_until_display_or_button_is_pressed();
+}
+
 void sleep_until_display_or_button_is_pressed() 
 {
+  pthread_mutex_lock(&watch_mutex);
+
   watch->power->clearIRQ();
 
   watch->displaySleep();
@@ -122,119 +200,6 @@ void sleep_until_display_or_button_is_pressed()
   esp_light_sleep_start();
 
   watch->power->clearIRQ();
-}
 
-void read_touch_task(void *args)
-{
-  for (;;) {
-    if (xSemaphoreTake(touch_semaphore, portMAX_DELAY) == pdTRUE) {
-      // Serial.print("touched: ");
-      // Serial.println(watch->touch->getTouched());
-
-      pthread_mutex_lock(&watch_input_mutex);
-      watch_input.touch_press_down = watch->touch->getTouched();
-      watch_input.touch_press_up = !watch_input.touch_press_down;
-      pthread_cond_signal(&watch_input_cond);
-      pthread_mutex_unlock(&watch_input_mutex);
-    }
-  }
-}
-
-void read_button_task(void *args)
-{
-  for (;;) {
-    if (xSemaphoreTake(button_semaphore, portMAX_DELAY) == pdTRUE) { 
-      watch->power->readIRQ();
-
-      bool is_long = watch->power->isPEKLongPressIRQ();
-      bool is_short = watch->power->isPEKShortPressIRQ();
-      
-      button_statefp old_state = button_state;
-      button_state = (button_statefp) button_state(is_long, is_short);
-
-      pthread_mutex_lock(&watch_input_mutex);
-      Serial.print("Button state: ");
-      if (button_state == not_pressed) {
-        Serial.println("released");
-
-        watch_input.button_down = false;
-        if (old_state == pressed_long) watch_input.button_up_long = true;
-        else if (old_state == pressed) watch_input.button_up_short = true;
-
-        pthread_cond_signal(&watch_input_cond);
-      } else if (button_state == pressed) {
-        Serial.println("pressed");
-
-        watch_input.button_down = true;
-        watch_input.button_up_long = false;
-        watch_input.button_up_short = false;
-
-        pthread_cond_signal(&watch_input_cond);
-      } else if (button_state == pressed_long) {
-        Serial.println("long pressed");
-      }
-      pthread_mutex_unlock(&watch_input_mutex);
-
-      watch->power->clearIRQ();
-    }
-  }
-}
-
-void loop()
-{
-loop_init:
-  Serial.println("loop");
-
-  watch->tft->begin();
-  watch->openBL();
-  watch->tft->fillScreen(TFT_BLACK);
-
-  Serial.println("draw_watch");
-  draw_watch(watch->tft);
-
-  Serial.println("Matteo genius");
-  watch->tft->setCursor(0, 0);
-  watch->tft->setTextSize(3);
-  watch->tft->println("Matteo genius");
-
-  // Serial.println("entering for (;;)");
-  for (;;) {
-    pthread_mutex_lock(&watch_input_mutex);
-    pthread_cond_wait(&watch_input_cond, &watch_input_mutex);
-
-    Serial.println("");
-    Serial.println("state changed: ");
-    Serial.print("pressed: ");
-    Serial.println(watch_input.button_down);
-    Serial.print("short release: ");
-    Serial.println(watch_input.button_up_short);
-    Serial.print("long release: ");
-    Serial.println(watch_input.button_up_long);
-    Serial.print("touch down: ");
-    Serial.println(watch_input.touch_press_down);
-    Serial.print("touch up: ");
-    Serial.println(watch_input.touch_press_up);
-
-    watch_state = (watch_statefp) watch_state(&watch_input);
-    if (watch_state == off) puts("off");
-    else if (watch_state == show_time) puts("show_time");
-    else if (watch_state == show_time_pressing) puts("show_time_pressing");
-    // else if (watch_state == ping_pong) puts("ping_pong");
-    // else if (watch_state == ping_pong_pressing) puts("ping_pong_pressing");
-    else puts("unknown state");
-
-    if (watch_state == off) {
-      memset((void *) (&watch_input), 0, sizeof(watch_input));
-      sleep_until_display_or_button_is_pressed();
-      watch_state = (watch_statefp) watch_state(&watch_input);
-      pthread_mutex_unlock(&watch_input_mutex);
-      goto loop_init;
-    }
-
-    pthread_mutex_unlock(&watch_input_mutex);
-  }
-
-  Serial.println("go to sleep");
-  sleep_until_display_or_button_is_pressed();
-
+  pthread_mutex_unlock(&watch_mutex);
 }

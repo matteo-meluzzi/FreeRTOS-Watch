@@ -26,12 +26,111 @@ button_statefp button_state = not_pressed;
 SemaphoreHandle_t touch_semaphore = NULL;
 
 QueueHandle_t event_queue = NULL;
-typedef void (* eventfp)(uint16_t, uint16_t);
+// typedef void (* eventfp)(uint16_t, uint16_t);
+typedef enum {
+  TOUCH_DOWN_EVENT,
+  TOUCH_UP_EVENT,
+  BUTTON_UP_EVENT,
+  BUTTON_LONG_PRESS_EVENT
+} EventType;
+
 struct Event {
-  eventfp action;
+  EventType type;
   uint16_t param1;
   uint16_t param2;
 };
+
+struct App {
+  virtual void setup() = 0;
+  virtual void on_touch_down(uint16_t x, uint16_t y) = 0;
+  virtual void on_touch_up(uint16_t x, uint16_t y) = 0;
+  virtual void on_button_up() = 0;
+  virtual void on_button_long_press() = 0;
+};
+App *current_app;
+
+void set_current_app(App *new_app) {
+  current_app = new_app;
+  current_app->setup();
+}
+
+struct WatchApp : App {
+  void setup();
+  void on_touch_down(uint16_t x, uint16_t y);
+  void on_touch_up(uint16_t x, uint16_t y);
+  void on_button_up();
+  void on_button_long_press();
+};
+WatchApp watch_app = {};
+
+struct PingPongApp: App {
+  void setup();
+  void on_touch_down(uint16_t x, uint16_t y);
+  void on_touch_up(uint16_t x, uint16_t y);
+  void on_button_up();
+  void on_button_long_press();
+};
+PingPongApp ping_pong_app = {};
+
+void WatchApp::setup() {
+  pthread_mutex_lock(&watch_mutex);
+
+  watch->tft->fillScreen(TFT_BLACK);
+
+  draw_watch(watch->tft);
+
+  watch->tft->setCursor(0, 0);
+  watch->tft->setTextSize(3);
+  watch->tft->println("Matteo genius");
+
+  pthread_mutex_unlock(&watch_mutex);
+}
+
+void WatchApp::on_touch_down(uint16_t x, uint16_t y) {
+  Serial.print("Touch Down: ");
+  Serial.print(x);
+  Serial.print(" ");
+  Serial.println(y);
+}
+
+void WatchApp::on_touch_up(uint16_t x, uint16_t y) {
+  Serial.print("Touch Up: ");
+  Serial.print(x);
+  Serial.print(" ");
+  Serial.println(y);
+  if (xTaskGetTickCount() - last_woke_up_ticks > 250) {
+    Serial.println("Going to sleep. Bye!");
+    sleep_until_display_or_button_is_pressed();
+  }
+}
+
+void WatchApp::on_button_up() {
+  Serial.println("Button up");
+  set_current_app(&ping_pong_app);
+}
+
+void WatchApp::on_button_long_press() {
+  Serial.println("Button long");
+}
+
+void PingPongApp::setup() {
+  pthread_mutex_lock(&watch_mutex);
+
+  watch->tft->fillScreen(TFT_RED);
+
+  pthread_mutex_unlock(&watch_mutex);
+}
+void PingPongApp::on_touch_down(uint16_t x, uint16_t y) {
+}
+
+void PingPongApp::on_touch_up(uint16_t x, uint16_t y) {
+}
+
+void PingPongApp::on_button_up() {
+}
+
+void PingPongApp::on_button_long_press() {
+}
 
 void read_button_task(void *args);
 void read_touch_task(void *args);
@@ -45,6 +144,9 @@ void setup()
   assert(touch_semaphore);
   event_queue = xQueueCreate(25, sizeof(Event));
   assert(event_queue);
+
+  current_app = &watch_app;
+  assert(current_app);
 
   Serial.begin(115200);
   Serial.println("Hi!");
@@ -87,32 +189,6 @@ void setup()
   xTaskCreate(read_touch_task, "read_touch_task", 2048, NULL, 1, NULL);
 }
 
-void on_touch_down(uint16_t x, uint16_t y) {
-  Serial.print("Touch Down: ");
-  Serial.print(x);
-  Serial.print(" ");
-  Serial.println(y);
-}
-
-void on_touch_up(uint16_t x, uint16_t y) {
-  Serial.print("Touch Up: ");
-  Serial.print(x);
-  Serial.print(" ");
-  Serial.println(y);
-  if (xTaskGetTickCount() - last_woke_up_ticks > 250) {
-    Serial.println("Going to sleep. Bye!");
-    sleep_until_display_or_button_is_pressed();
-  }
-}
-
-void on_button_up(uint16_t x, uint16_t y) {
-  Serial.println("Button up");
-}
-
-void on_button_long_press(uint16_t x, uint16_t y) {
-  Serial.println("Button long");
-}
-
 void read_touch_task(void *args)
 {
   for (;;) {
@@ -125,8 +201,8 @@ void read_touch_task(void *args)
 
       pthread_mutex_unlock(&watch_mutex);
 
-      eventfp action = touched ? on_touch_down : on_touch_up; // queue copies whatever is in tmp (the address of on_touch_down)
-      Event e = {action, x, y};
+      EventType t = touched ? TOUCH_DOWN_EVENT : TOUCH_UP_EVENT;
+      Event e = {t, x, y};
       xQueueSendToBack(event_queue, (const void *) &e, (TickType_t) 0);
     }
   }
@@ -149,11 +225,11 @@ void read_button_task(void *args)
       button_state = (button_statefp) button_state(is_long, is_short);
 
       if (button_state == not_pressed && old_state == pressed) {
-        Event e = {on_button_up, 0, 0};
+        Event e = {BUTTON_UP_EVENT, 0, 0};
         xQueueSendToBack(event_queue, (const void *) &e, (TickType_t) 0);
       }
       else if (button_state == pressed_long && old_state == pressed) {
-        Event e = {on_button_long_press, 0, 0};
+        Event e = {BUTTON_LONG_PRESS_EVENT, 0, 0};
         xQueueSendToBack(event_queue, (const void *) &e, (TickType_t) 0);
       } 
     }
@@ -169,7 +245,24 @@ void loop()
     Event event;
     // Serial.println("waiting for event");
     if (xQueueReceive(event_queue, &event, portMAX_DELAY) == pdTRUE) {
-      event.action(event.param1, event.param2);
+      //event.action(event.param1, event.param2);
+      switch (event.type)
+      {
+      case TOUCH_DOWN_EVENT:
+        current_app->on_touch_down(event.param1, event.param2);
+        break;
+      case TOUCH_UP_EVENT:
+        current_app->on_touch_up(event.param1, event.param2);
+        break;
+      case BUTTON_UP_EVENT:
+        current_app->on_button_up();
+        break;
+      case BUTTON_LONG_PRESS_EVENT:
+        current_app->on_button_long_press();
+        break;
+      default:
+        break;
+      }
     }
   }
 }
@@ -178,19 +271,11 @@ void wake_up() {
   pthread_mutex_lock(&watch_mutex);
   watch->tft->begin();
   watch->openBL();
-  watch->tft->fillScreen(TFT_BLACK);
+  pthread_mutex_unlock(&watch_mutex);
 
-  Serial.println("draw_watch");
-  draw_watch(watch->tft);
-
-  Serial.println("Matteo genius");
-  watch->tft->setCursor(0, 0);
-  watch->tft->setTextSize(3);
-  watch->tft->println("Matteo genius");
+  current_app->setup();
 
   last_woke_up_ticks = xTaskGetTickCount();
-
-  pthread_mutex_unlock(&watch_mutex);
 }
 
 void sleep_until_display_or_button_is_pressed() 

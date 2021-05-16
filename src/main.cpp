@@ -79,10 +79,6 @@ void WatchApp::setup() {
 
   draw_watch(watch->tft);
 
-  watch->tft->setCursor(0, 0);
-  watch->tft->setTextSize(3);
-  watch->tft->println("Matteo genius");
-
   pthread_mutex_unlock(&watch_mutex);
 }
 
@@ -118,6 +114,10 @@ void PingPongApp::setup() {
 
   watch->tft->fillScreen(TFT_RED);
 
+  watch->tft->setCursor(0, 0);
+  watch->tft->setTextSize(3);
+  watch->tft->println("Ping Pong Counter");
+
   pthread_mutex_unlock(&watch_mutex);
 }
 void PingPongApp::on_touch_down(uint16_t x, uint16_t y) {
@@ -127,6 +127,7 @@ void PingPongApp::on_touch_up(uint16_t x, uint16_t y) {
 }
 
 void PingPongApp::on_button_up() {
+  set_current_app(&watch_app);
 }
 
 void PingPongApp::on_button_long_press() {

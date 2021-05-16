@@ -17,6 +17,8 @@ TTGOClass *watch;
 pthread_mutex_t watch_mutex;
 
 void sleep_until_display_or_button_is_pressed();
+void wake_up();
+TickType_t last_woke_up_ticks = 0;
 
 SemaphoreHandle_t button_semaphore = NULL;
 button_statefp button_state = not_pressed;
@@ -81,8 +83,8 @@ void setup()
   watch->power->enableIRQ(AXP202_PEK_RISING_EDGE_IRQ, true);
   watch->power->clearIRQ();
 
-  xTaskCreate(read_button_task, "read_button_task", 1024, NULL, 1, NULL);
-  xTaskCreate(read_touch_task, "read_touch_task", 1024, NULL, 1, NULL);
+  xTaskCreate(read_button_task, "read_button_task", 2048, NULL, 1, NULL);
+  xTaskCreate(read_touch_task, "read_touch_task", 2048, NULL, 1, NULL);
 }
 
 void on_touch_down(uint16_t x, uint16_t y) {
@@ -97,6 +99,10 @@ void on_touch_up(uint16_t x, uint16_t y) {
   Serial.print(x);
   Serial.print(" ");
   Serial.println(y);
+  if (xTaskGetTickCount() - last_woke_up_ticks > 250) {
+    Serial.println("Going to sleep. Bye!");
+    sleep_until_display_or_button_is_pressed();
+  }
 }
 
 void on_button_up(uint16_t x, uint16_t y) {
@@ -104,7 +110,7 @@ void on_button_up(uint16_t x, uint16_t y) {
 }
 
 void on_button_long_press(uint16_t x, uint16_t y) {
-  Serial.println("Button up long");
+  Serial.println("Button long");
 }
 
 void read_touch_task(void *args)
@@ -157,7 +163,18 @@ void read_button_task(void *args)
 void loop()
 {
   Serial.println("loop");
+  wake_up();
 
+  for (;;) {
+    Event event;
+    // Serial.println("waiting for event");
+    if (xQueueReceive(event_queue, &event, portMAX_DELAY) == pdTRUE) {
+      event.action(event.param1, event.param2);
+    }
+  }
+}
+
+void wake_up() {
   pthread_mutex_lock(&watch_mutex);
   watch->tft->begin();
   watch->openBL();
@@ -170,18 +187,10 @@ void loop()
   watch->tft->setCursor(0, 0);
   watch->tft->setTextSize(3);
   watch->tft->println("Matteo genius");
+
+  last_woke_up_ticks = xTaskGetTickCount();
+
   pthread_mutex_unlock(&watch_mutex);
-
-  for (;;) {
-    Event event;
-    Serial.println("waiting for event");
-    if (xQueueReceive(event_queue, &event, portMAX_DELAY) == pdTRUE) {
-      event.action(event.param1, event.param2);
-    }
-  }
-
-  Serial.println("go to sleep");
-  sleep_until_display_or_button_is_pressed();
 }
 
 void sleep_until_display_or_button_is_pressed() 
@@ -202,4 +211,6 @@ void sleep_until_display_or_button_is_pressed()
   watch->power->clearIRQ();
 
   pthread_mutex_unlock(&watch_mutex);
+
+  wake_up();
 }

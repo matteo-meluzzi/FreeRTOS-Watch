@@ -22,13 +22,9 @@ void draw_minute_ticks(TFT_eSPI *tft, uint8_t cx, uint8_t cy, uint8_t r1, uint8_
   }
 }
 
-void draw_watch(TFT_eSPI *tft) {
+void draw_watch(TFT_eSPI *tft, double hour, double minute, double second) {
   draw_minute_ticks(tft, 120, 120, 117, 107, rgb565(128, 128, 128));
   draw_hour_ticks(tft, 120, 120, 117, 90, rgb565(128, 128, 128));
-
-  double second = 45.0;
-  double minute = 15.0;
-  double hour = 11.0;
 
   // hours
   tft->drawThickTick(120, 120, 0, 16, 360.0 / 12.0 * (1.0 * hour + minute / 60.0), 1, rgb565(255, 255, 255));

@@ -46,6 +46,10 @@ struct App {
   virtual void on_touch_up(uint16_t x, uint16_t y) = 0;
   virtual void on_button_up() = 0;
   virtual void on_button_long_press() = 0;
+  /**
+   * called per second
+   * */
+  virtual void update() = 0;
 };
 App *current_app;
 
@@ -60,6 +64,7 @@ struct WatchApp : App {
   void on_touch_up(uint16_t x, uint16_t y);
   void on_button_up();
   void on_button_long_press();
+  void update();
 };
 WatchApp watch_app = {};
 
@@ -69,17 +74,12 @@ struct PingPongApp: App {
   void on_touch_up(uint16_t x, uint16_t y);
   void on_button_up();
   void on_button_long_press();
+  void update();
 };
 PingPongApp ping_pong_app = {};
 
 void WatchApp::setup() {
-  pthread_mutex_lock(&watch_mutex);
-
-  watch->tft->fillScreen(TFT_BLACK);
-
-  draw_watch(watch->tft);
-
-  pthread_mutex_unlock(&watch_mutex);
+  this->update();
 }
 
 void WatchApp::on_touch_down(uint16_t x, uint16_t y) {
@@ -109,6 +109,36 @@ void WatchApp::on_button_long_press() {
   Serial.println("Button long");
 }
 
+void WatchApp::update() {
+  pthread_mutex_lock(&watch_mutex);
+
+  // RTC_Date date = watch->rtc->getDateTime();
+  // double hour = (double) (date.hour % 12);
+  // double minute = (double) date.minute;
+  // double second = (double) date.second;
+
+  // Serial.print("hr: ");
+  // Serial.print(hour);
+  // Serial.print("min: ");
+  // Serial.print(minute);
+  // Serial.print("sec: ");
+  // Serial.println(second);
+  
+  //draw_watch(watch->tft, hour, minute, second);
+
+  watch->tft->setTextSize(3);
+  watch->tft->setCursor(30, 20);
+  watch->tft->println(watch->rtc->formatDateTime(PCF_TIMEFORMAT_DD_MM_YYYY));
+  watch->tft->println("");
+  watch->tft->println("");
+  // watch->tft->println("");
+  watch->tft->setTextSize(5);
+  // watch->tft->setCursor(20, watch->tft->getCursorY());
+  watch->tft->println(watch->rtc->formatDateTime(PCF_TIMEFORMAT_HMS));
+
+  pthread_mutex_unlock(&watch_mutex);
+}
+
 void PingPongApp::setup() {
   pthread_mutex_lock(&watch_mutex);
 
@@ -133,8 +163,15 @@ void PingPongApp::on_button_up() {
 void PingPongApp::on_button_long_press() {
 }
 
+void PingPongApp::update() {}
+
 void read_button_task(void *args);
 void read_touch_task(void *args);
+
+esp_timer_handle_t one_second_timer;
+void every_second(void *arg) {
+  current_app->update();
+}
 
 void setup()
 {
@@ -185,6 +222,11 @@ void setup()
   watch->power->enableIRQ(AXP202_PEK_FALLING_EDGE_IRQ, true);
   watch->power->enableIRQ(AXP202_PEK_RISING_EDGE_IRQ, true);
   watch->power->clearIRQ();
+
+  esp_timer_init();
+  esp_timer_create_args_t args = {every_second, nullptr, ESP_TIMER_TASK, "one second timer"};
+  ESP_ERROR_CHECK(esp_timer_create(&args, &one_second_timer));
+  ESP_ERROR_CHECK(esp_timer_start_periodic(one_second_timer, 1000000));
 
   xTaskCreate(read_button_task, "read_button_task", 2048, NULL, 1, NULL);
   xTaskCreate(read_touch_task, "read_touch_task", 2048, NULL, 1, NULL);

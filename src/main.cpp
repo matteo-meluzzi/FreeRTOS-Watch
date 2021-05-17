@@ -24,7 +24,7 @@ SemaphoreHandle_t button_semaphore = NULL;
 SemaphoreHandle_t touch_semaphore = NULL;
 
 QueueHandle_t event_queue = NULL;
-// typedef void (* eventfp)(uint16_t, uint16_t);
+
 typedef enum {
   TOUCH_DOWN_EVENT,
   TOUCH_UP_EVENT,
@@ -84,55 +84,32 @@ void WatchApp::setup() {
 }
 
 void WatchApp::on_touch_down(uint16_t x, uint16_t y) {
-  // Serial.print("Touch Down: ");
-  // Serial.print(x);
-  // Serial.print(" ");
-  // Serial.println(y);
+  //Serial.println("watch Touch Down");
 }
 
 void WatchApp::on_touch_up(uint16_t x, uint16_t y) {
-  // Serial.print("Touch Up: ");
-  // Serial.print(x);
-  // Serial.print(" ");
-  // Serial.println(y);
-  // Serial.println("Going to sleep. Bye!");
+  //Serial.println("watch Touch Up");
   sleep_until_display_or_button_is_pressed();
 }
 
 void WatchApp::on_button_up() {
-  // Serial.println("Button up");
+  //Serial.println("watch Button up");
   set_current_app(&ping_pong_app);
 }
 
 void WatchApp::on_button_long_press() {
-  // Serial.println("Button long");
+  //Serial.println("watch Button long");
 }
 
 void WatchApp::update() {
   pthread_mutex_lock(&watch_mutex);
-
-  // RTC_Date date = watch->rtc->getDateTime();
-  // double hour = (double) (date.hour % 12);
-  // double minute = (double) date.minute;
-  // double second = (double) date.second;
-
-  // Serial.print("hr: ");
-  // Serial.print(hour);
-  // Serial.print("min: ");
-  // Serial.print(minute);
-  // Serial.print("sec: ");
-  // Serial.println(second);
-  
-  //draw_watch(watch->tft, hour, minute, second);
 
   watch->tft->setTextSize(3);
   watch->tft->setCursor(30, 20);
   watch->tft->println(watch->rtc->formatDateTime(PCF_TIMEFORMAT_DD_MM_YYYY));
   watch->tft->println("");
   watch->tft->println("");
-  // watch->tft->println("");
   watch->tft->setTextSize(5);
-  // watch->tft->setCursor(20, watch->tft->getCursorY());
   watch->tft->println(watch->rtc->formatDateTime(PCF_TIMEFORMAT_HMS));
 
   pthread_mutex_unlock(&watch_mutex);
@@ -150,18 +127,20 @@ void PingPongApp::setup() {
   pthread_mutex_unlock(&watch_mutex);
 }
 void PingPongApp::on_touch_down(uint16_t x, uint16_t y) {
+  //Serial.println("ping pong touch down");
 }
 
 void PingPongApp::on_touch_up(uint16_t x, uint16_t y) {
+  //Serial.println("ping pong touch up");
 }
 
 void PingPongApp::on_button_up() {
-  // Serial.println("Button up");
+  //Serial.println("ping pong Button up");
   set_current_app(&watch_app);
 }
 
 void PingPongApp::on_button_long_press() {
-  // Serial.println("Button long");
+  //Serial.println("ping pong Button long");
 }
 
 void PingPongApp::update() {}
@@ -200,7 +179,6 @@ void setup()
   Serial.begin(115200);
   Serial.println("Hi!");
 
-  // Get TTGOClass instance
   watch = TTGOClass::getWatch();
 
   // Initialize the hardware, the BMA423 sensor has been initialized internally
@@ -236,13 +214,10 @@ void setup()
   }
   WiFi.disconnect(true, false);
 
-
   pinMode(AXP202_INT, INPUT_PULLUP);
   attachInterrupt(AXP202_INT, [] {
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
     xSemaphoreGiveFromISR(button_semaphore, &xHigherPriorityTaskWoken);
-
-    // Serial.println("button state change");
   }, FALLING);
 
   // set touch panel in interrupt polling mode
@@ -253,13 +228,10 @@ void setup()
   attachInterrupt(TOUCH_INT, [] {
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
     xSemaphoreGiveFromISR(touch_semaphore, &xHigherPriorityTaskWoken);
-
-    // Serial.print("touched: ");
-    // Serial.println(digitalRead(TOUCH_INT));
   }, CHANGE);
 
-  watch->power->enableIRQ(AXP202_PEK_FALLING_EDGE_IRQ, true);
-  watch->power->enableIRQ(AXP202_PEK_RISING_EDGE_IRQ, true);
+  watch->power->enableIRQ(AXP202_PEK_SHORTPRESS_IRQ, true);
+  watch->power->enableIRQ(AXP202_PEK_LONGPRESS_IRQ, true);
   watch->power->clearIRQ();
 
   esp_timer_init();
@@ -302,17 +274,7 @@ void read_button_task(void *args)
 
       watch->power->clearIRQ();
       pthread_mutex_unlock(&watch_mutex);
-
-      // button_statefp old_state = button_state;
-      // button_state = (button_statefp) button_state(is_long, is_short);
-
-      // if (button_state == pressed) {
-      //   Serial.println("button pressed");
-      // } else if (button_state == not_pressed) {
-      //   Serial.println("button released");
-      // } else if (button_state == pressed_long) {
-      //   Serial.println("button pressed long");
-      // }
+      // Serial.println("button read");
 
       if (is_short) {
         Event e = {BUTTON_UP_EVENT, 0, 0};

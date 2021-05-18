@@ -1,6 +1,4 @@
-
-
-#include "matteo_watch.h"
+#include "matteo-watch.h"
 
 #include <LilyGoWatch.h>
 #include <TTGO.h>
@@ -8,22 +6,15 @@
 #include <WiFi.h>
 #include <pthread.h>
 
-#include "config.h"
+#include "WatchApp.h"
+#include "PingPongApp.h"
 
-#include "draw_watch.h"
-
-TTGOClass *watch;
-pthread_mutex_t watch_mutex;
-
+void set_current_app(App *new_app);
 void sleep_until_display_or_button_is_pressed();
 void wake_up();
-TickType_t last_woke_up_ticks = 0;
 
-SemaphoreHandle_t button_semaphore = NULL;
-
-SemaphoreHandle_t touch_semaphore = NULL;
-
-QueueHandle_t event_queue = NULL;
+void read_button_task(void *args);
+void read_touch_task(void *args);
 
 typedef enum {
   TOUCH_DOWN_EVENT,
@@ -38,121 +29,29 @@ struct Event {
   uint16_t param2;
 };
 
-struct App {
-  virtual void setup() = 0;
-  virtual void on_touch_down(uint16_t x, uint16_t y) = 0;
-  virtual void on_touch_up(uint16_t x, uint16_t y) = 0;
-  virtual void on_button_up() = 0;
-  virtual void on_button_long_press() = 0;
-  /**
-   * called per second
-   * */
-  virtual void update() = 0;
-};
+TTGOClass *watch;
+pthread_mutex_t watch_mutex;
+
+TickType_t last_woke_up_ticks = 0;
+
+SemaphoreHandle_t button_semaphore = NULL;
+
+SemaphoreHandle_t touch_semaphore = NULL;
+
+QueueHandle_t event_queue = NULL;
+
 App *current_app;
+
+PingPongApp ping_pong_app = {};
+WatchApp watch_app = {};
 
 void set_current_app(App *new_app) {
   current_app = new_app;
   current_app->setup();
 }
 
-struct WatchApp : App {
-  void setup();
-  void on_touch_down(uint16_t x, uint16_t y);
-  void on_touch_up(uint16_t x, uint16_t y);
-  void on_button_up();
-  void on_button_long_press();
-  void update();
-};
-WatchApp watch_app = {};
-
-struct PingPongApp: App {
-  void setup();
-  void on_touch_down(uint16_t x, uint16_t y);
-  void on_touch_up(uint16_t x, uint16_t y);
-  void on_button_up();
-  void on_button_long_press();
-  void update();
-};
-PingPongApp ping_pong_app = {};
-
-void WatchApp::setup() {
-  pthread_mutex_lock(&watch_mutex);
-  watch->tft->fillScreen(TFT_BLACK);
-  pthread_mutex_unlock(&watch_mutex);
-  this->update();
-}
-
-void WatchApp::on_touch_down(uint16_t x, uint16_t y) {
-  //Serial.println("watch Touch Down");
-}
-
-void WatchApp::on_touch_up(uint16_t x, uint16_t y) {
-  //Serial.println("watch Touch Up");
-  sleep_until_display_or_button_is_pressed();
-}
-
-void WatchApp::on_button_up() {
-  //Serial.println("watch Button up");
-  set_current_app(&ping_pong_app);
-}
-
-void WatchApp::on_button_long_press() {
-  //Serial.println("watch Button long");
-}
-
-void WatchApp::update() {
-  pthread_mutex_lock(&watch_mutex);
-
-  watch->tft->setTextSize(3);
-  watch->tft->setCursor(30, 20);
-  watch->tft->println(watch->rtc->formatDateTime(PCF_TIMEFORMAT_DD_MM_YYYY));
-  watch->tft->println("");
-  watch->tft->println("");
-  watch->tft->setTextSize(5);
-  watch->tft->println(watch->rtc->formatDateTime(PCF_TIMEFORMAT_HMS));
-
-  pthread_mutex_unlock(&watch_mutex);
-}
-
-void PingPongApp::setup() {
-  pthread_mutex_lock(&watch_mutex);
-
-  watch->tft->fillScreen(TFT_RED);
-
-  watch->tft->setCursor(0, 0);
-  watch->tft->setTextSize(3);
-  watch->tft->println("Ping Pong Counter");
-
-  pthread_mutex_unlock(&watch_mutex);
-}
-void PingPongApp::on_touch_down(uint16_t x, uint16_t y) {
-  //Serial.println("ping pong touch down");
-}
-
-void PingPongApp::on_touch_up(uint16_t x, uint16_t y) {
-  //Serial.println("ping pong touch up");
-}
-
-void PingPongApp::on_button_up() {
-  //Serial.println("ping pong Button up");
-  set_current_app(&watch_app);
-}
-
-void PingPongApp::on_button_long_press() {
-  //Serial.println("ping pong Button long");
-}
-
-void PingPongApp::update() {}
-
-void read_button_task(void *args);
-void read_touch_task(void *args);
-
 esp_timer_handle_t one_second_timer;
 void every_second(void *arg) {
-  // static int c = 0;
-  // Serial.print("timer fired ");
-  // Serial.println(c++);
   current_app->update();
 }
 
@@ -163,28 +62,7 @@ const char *ntpServer       = "pool.ntp.org";
 const long  gmtOffset_sec   = 3600;
 const int   daylightOffset_sec = 3600;
 
-void setup()
-{
-  ESP_ERROR_CHECK(pthread_mutex_init(&watch_mutex, NULL));
-  button_semaphore = xSemaphoreCreateBinary();
-  assert(button_semaphore);
-  touch_semaphore = xSemaphoreCreateBinary();
-  assert(touch_semaphore);
-  event_queue = xQueueCreate(25, sizeof(Event));
-  assert(event_queue);
-
-  current_app = &watch_app;
-  assert(current_app);
-
-  Serial.begin(115200);
-  Serial.println("Hi!");
-
-  watch = TTGOClass::getWatch();
-
-  // Initialize the hardware, the BMA423 sensor has been initialized internally
-  watch->begin();
-  watch->bl->adjust(255);
-
+void update_rtc_from_wifi() {
   watch->tft->print("connecting to the wifi");
   WiFi.begin(ssid, password);
   int count = 0;
@@ -213,6 +91,32 @@ void setup()
     watch->rtc->syncToRtc();
   }
   WiFi.disconnect(true, false);
+}
+
+void setup()
+{
+  ESP_ERROR_CHECK(pthread_mutex_init(&watch_mutex, NULL));
+  button_semaphore = xSemaphoreCreateBinary();
+  assert(button_semaphore);
+  touch_semaphore = xSemaphoreCreateBinary();
+  assert(touch_semaphore);
+  event_queue = xQueueCreate(25, sizeof(Event));
+  assert(event_queue);
+
+  current_app = &watch_app;
+  assert(current_app);
+
+  Serial.begin(115200);
+  Serial.println("Hi!");
+
+  watch = TTGOClass::getWatch();
+
+  // Initialize the hardware, the BMA423 sensor has been initialized internally
+  watch->begin();
+  watch->bl->adjust(255);
+  watch->tft->setSwapBytes(true); // Swap the 2 bytes of an image which form a pixel
+
+  // update_rtc_from_wifi();
 
   pinMode(AXP202_INT, INPUT_PULLUP);
   attachInterrupt(AXP202_INT, [] {

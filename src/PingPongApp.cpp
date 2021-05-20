@@ -1,18 +1,15 @@
 
 #include "PingPongApp.h"
-#include "WatchApp.h"
+#include "BluetoothSpeakerApp.h"
 #include "matteo-face.h"
 
 #include <pthread.h>
-
 #include "matteo-watch.h"
 #include <LilyGoWatch.h>
 #include <TTGO.h>
 
 extern TTGOClass *watch;
 extern pthread_mutex_t watch_mutex;
-extern void set_current_app(App *);
-extern WatchApp watch_app;
 
 void PingPongApp::setup() {
   pthread_mutex_lock(&watch_mutex);
@@ -36,7 +33,7 @@ void PingPongApp::on_button_up() {
   watch->tft->invertDisplay(true);
   pthread_mutex_unlock(&watch_mutex);
 
-  set_current_app(&watch_app);
+  App::on_button_up();
 }
 
 void PingPongApp::on_button_long_press() {

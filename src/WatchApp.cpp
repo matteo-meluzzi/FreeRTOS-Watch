@@ -9,9 +9,7 @@
 
 extern TTGOClass *watch;
 extern pthread_mutex_t watch_mutex;
-extern void set_current_app(App *);
 extern void sleep_until_display_or_button_is_pressed();
-extern PingPongApp ping_pong_app;
 
 void WatchApp::setup() {
     pthread_mutex_lock(&watch_mutex);
@@ -28,12 +26,8 @@ void WatchApp::on_touch_down(uint16_t x, uint16_t y) {
 
 void WatchApp::on_touch_up(uint16_t x, uint16_t y) {
   //Serial.println("watch Touch Up");
+  
   sleep_until_display_or_button_is_pressed();
-}
-
-void WatchApp::on_button_up() {
-  //Serial.println("watch Button up");
-  set_current_app(&ping_pong_app);
 }
 
 void WatchApp::on_button_long_press() {

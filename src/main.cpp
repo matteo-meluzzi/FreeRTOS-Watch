@@ -8,6 +8,7 @@
 
 #include "WatchApp.h"
 #include "PingPongApp.h"
+#include "BluetoothSpeakerApp.h"
 
 void set_current_app(App *new_app);
 void sleep_until_display_or_button_is_pressed();
@@ -42,8 +43,13 @@ QueueHandle_t event_queue = NULL;
 
 App *current_app;
 
-PingPongApp ping_pong_app = {};
-WatchApp watch_app = {};
+extern PingPongApp ping_pong_app;
+extern WatchApp watch_app;
+extern BluetoothSpeakerApp speaker_app;
+
+WatchApp watch_app = {&ping_pong_app};
+PingPongApp ping_pong_app = {&speaker_app};
+BluetoothSpeakerApp speaker_app = {&watch_app};
 
 void set_current_app(App *new_app) {
   current_app = new_app;
@@ -135,7 +141,6 @@ void setup()
   }, CHANGE);
 
   watch->power->enableIRQ(AXP202_PEK_SHORTPRESS_IRQ, true);
-  watch->power->enableIRQ(AXP202_PEK_LONGPRESS_IRQ, true);
   watch->power->clearIRQ();
 
   esp_timer_init();
@@ -171,14 +176,13 @@ void read_button_task(void *args)
   for (;;) {
     if (xSemaphoreTake(button_semaphore, portMAX_DELAY) == pdTRUE) {
       pthread_mutex_lock(&watch_mutex);
-      watch->power->readIRQ();
 
+      watch->power->readIRQ();
       bool is_long = watch->power->isPEKLongPressIRQ();
       bool is_short = watch->power->isPEKShortPressIRQ();
-
       watch->power->clearIRQ();
+
       pthread_mutex_unlock(&watch_mutex);
-      // Serial.println("button read");
 
       if (is_short) {
         Event e = {BUTTON_UP_EVENT, 0, 0};
@@ -199,10 +203,8 @@ void loop()
 
   for (;;) {
     Event event;
-    // Serial.println("waiting for event");
 
     if (xQueueReceive(event_queue, &event, portMAX_DELAY) == pdTRUE && xTaskGetTickCount() - last_woke_up_ticks > 200) {
-      //event.action(event.param1, event.param2);
       switch (event.type)
       {
       case TOUCH_DOWN_EVENT:

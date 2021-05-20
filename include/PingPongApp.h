@@ -4,7 +4,10 @@
 
 #include "App.h"
 
-struct PingPongApp: App {
+struct PingPongApp: public App
+ {  
+  PingPongApp(App *next_app): App(next_app) {}
+
   void setup();
   void on_touch_down(uint16_t x, uint16_t y);
   void on_touch_up(uint16_t x, uint16_t y);

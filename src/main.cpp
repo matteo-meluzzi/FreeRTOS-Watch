@@ -65,7 +65,7 @@ void every_second(void *arg) {
   current_app->update();
 }
 
-const char *ssid            = "room 12.4 rules";
+const char *ssid            = "Saettanet";
 const char *password        = "cocongo72";
 
 const char *ntpServer       = "pool.ntp.org";
@@ -179,7 +179,6 @@ void read_button_task(void *args)
   for (;;) {
     if (xSemaphoreTake(button_semaphore, portMAX_DELAY) == pdTRUE) {
       pthread_mutex_lock(&watch_mutex);
-
       watch->power->readIRQ();
       bool is_long = watch->power->isPEKLongPressIRQ();
       bool is_short = watch->power->isPEKShortPressIRQ();
@@ -192,7 +191,6 @@ void read_button_task(void *args)
         Event e = {BUTTON_LONG_PRESS_EVENT, 0, 0};
         xQueueSendToBack(event_queue, (const void *) &e, (TickType_t) 0);
       }
-      
       watch->power->clearIRQ();
       pthread_mutex_unlock(&watch_mutex);
     }

@@ -132,8 +132,7 @@ void setup()
 
   pinMode(AXP202_INT, INPUT_PULLUP);
   attachInterrupt(AXP202_INT, [] {
-    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-    xSemaphoreGiveFromISR(button_semaphore, &xHigherPriorityTaskWoken);
+    xSemaphoreGiveFromISR(button_semaphore, nullptr);
   }, FALLING);
   watch->power->enableIRQ(AXP202_PEK_SHORTPRESS_IRQ, true);
   watch->power->clearIRQ();
@@ -144,8 +143,7 @@ void setup()
   watch->touch->disableINT(); 
   pinMode(TOUCH_INT, INPUT);
   attachInterrupt(TOUCH_INT, [] {
-    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-    xSemaphoreGiveFromISR(touch_semaphore, &xHigherPriorityTaskWoken);
+    xSemaphoreGiveFromISR(touch_semaphore, nullptr);
   }, CHANGE);
 
   esp_timer_init();

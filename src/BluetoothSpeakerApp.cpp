@@ -13,8 +13,16 @@ extern TTGOClass *watch;
 extern pthread_mutex_t watch_mutex;
 
 btAudio audio = btAudio("Matteo's watch");
+pthread_t audio_end_thread;
 
-void BluetoothSpeakerApp::setup() {
+void *audio_end(void *args) {
+    audio.end();
+    return nullptr;
+}
+
+void BluetoothSpeakerApp::setup() {   
+    pthread_join(audio_end_thread, nullptr); // if somehow the audio is still being ended we wait
+ 
     pthread_mutex_lock(&watch_mutex);
 
     watch->tft->pushImage(0, 0, 240, 240, ((uint16_t *) bluetooth_logo.pixel_data));
@@ -43,7 +51,7 @@ void BluetoothSpeakerApp::on_button_up() {
     watch->enableLDO3(false);
     pthread_mutex_unlock(&watch_mutex);
 
-    audio.end();
+    pthread_create(&audio_end_thread, nullptr, &audio_end, nullptr); // audio end is very slow so we do it in the background
 
     App::on_button_up();
 }

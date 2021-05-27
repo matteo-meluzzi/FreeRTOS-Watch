@@ -129,6 +129,8 @@ void setup()
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
     xSemaphoreGiveFromISR(button_semaphore, &xHigherPriorityTaskWoken);
   }, FALLING);
+  watch->power->enableIRQ(AXP202_PEK_SHORTPRESS_IRQ, true);
+  watch->power->clearIRQ();
 
   // set touch panel in interrupt polling mode
   // see https://www.buydisplay.com/download/ic/FT6236-FT6336-FT6436L-FT6436_Datasheet.pdf
@@ -139,9 +141,6 @@ void setup()
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
     xSemaphoreGiveFromISR(touch_semaphore, &xHigherPriorityTaskWoken);
   }, CHANGE);
-
-  watch->power->enableIRQ(AXP202_PEK_SHORTPRESS_IRQ, true);
-  watch->power->clearIRQ();
 
   esp_timer_init();
   esp_timer_create_args_t args = {every_second, nullptr, ESP_TIMER_TASK, "one second timer"};

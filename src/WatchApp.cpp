@@ -14,6 +14,7 @@ extern void sleep_until_display_or_button_is_pressed();
 void WatchApp::setup() {
     pthread_mutex_lock(&watch_mutex);
 
+    watch->tft->setTextColor(TFT_WHITE, TFT_BLACK);
     watch->tft->fillScreen(TFT_BLACK);
 
     pthread_mutex_unlock(&watch_mutex);
@@ -21,11 +22,11 @@ void WatchApp::setup() {
 }
 
 void WatchApp::on_touch_down(uint16_t x, uint16_t y) {
-  //Serial.println("watch Touch Down");
+  Serial.println("watch Touch Down");
 }
 
 void WatchApp::on_touch_up(uint16_t x, uint16_t y) {
-  //Serial.println("watch Touch Up");
+  Serial.println("watch Touch Up");
   
   sleep_until_display_or_button_is_pressed();
 }

@@ -5,6 +5,7 @@
 #include <freertos/semphr.h>
 #include <WiFi.h>
 #include <pthread.h>
+#include <btAudio.h>
 
 #include "WatchApp.h"
 #include "PingPongApp.h"
@@ -32,6 +33,9 @@ struct Event {
 
 TTGOClass *watch;
 pthread_mutex_t watch_mutex;
+
+btAudio audio = btAudio("Matteo's watch");
+pthread_mutex_t audio_mutex;
 
 TickType_t last_woke_up_ticks = 0;
 
@@ -102,9 +106,11 @@ void update_rtc_from_wifi() {
 void setup()
 {
   ESP_ERROR_CHECK(pthread_mutex_init(&watch_mutex, NULL));
-  button_semaphore = xSemaphoreCreateBinary();
+  ESP_ERROR_CHECK(pthread_mutex_init(&audio_mutex, NULL));
+
+  button_semaphore = xSemaphoreCreateCounting(1024, 0);
   assert(button_semaphore);
-  touch_semaphore = xSemaphoreCreateBinary();
+  touch_semaphore = xSemaphoreCreateCounting(1024, 0);
   assert(touch_semaphore);
   event_queue = xQueueCreate(25, sizeof(Event));
   assert(event_queue);
@@ -173,6 +179,10 @@ void read_touch_task(void *args)
 void read_button_task(void *args)
 {
   for (;;) {
+    pthread_mutex_lock(&watch_mutex);
+    watch->power->clearIRQ();
+    pthread_mutex_unlock(&watch_mutex);
+
     if (xSemaphoreTake(button_semaphore, portMAX_DELAY) == pdTRUE) {
       pthread_mutex_lock(&watch_mutex);
 

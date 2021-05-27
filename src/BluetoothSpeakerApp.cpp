@@ -51,7 +51,9 @@ void BluetoothSpeakerApp::on_button_up() {
     watch->enableLDO3(false);
     pthread_mutex_unlock(&watch_mutex);
 
-    pthread_create(&audio_end_thread, nullptr, &audio_end, nullptr); // audio end is very slow so we do it in the background
+    if (pthread_create(&audio_end_thread, nullptr, &audio_end, nullptr)) { // audio end is very slow so we do it in the background 
+        audio_end(nullptr); // if we got an error while creating the thread we end the audio on the current thread.
+    }
 
     App::on_button_up();
 }

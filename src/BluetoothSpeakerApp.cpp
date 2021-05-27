@@ -14,15 +14,6 @@ extern pthread_mutex_t watch_mutex;
 
 extern btAudio audio;
 extern pthread_mutex_t audio_mutex;
-pthread_t audio_end_thread;
-
-void *audio_end(void *args) {
-    pthread_mutex_lock(&audio_mutex);
-    audio.end();
-    pthread_mutex_unlock(&audio_mutex);
-
-    return nullptr;
-}
 
 void BluetoothSpeakerApp::setup() {    
     pthread_mutex_lock(&watch_mutex);
@@ -56,9 +47,9 @@ void BluetoothSpeakerApp::on_button_up() {
     watch->enableLDO3(false);
     pthread_mutex_unlock(&watch_mutex);
 
-    if (pthread_create(&audio_end_thread, nullptr, &audio_end, nullptr)) { // audio end is very slow so we do it in the background 
-        audio_end(nullptr); // if we got an error while creating the thread we end the audio on the current thread.
-    }
+    pthread_mutex_lock(&audio_mutex);
+    audio.end();
+    pthread_mutex_unlock(&audio_mutex);
 
     App::on_button_up();
 }

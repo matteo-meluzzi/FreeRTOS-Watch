@@ -177,19 +177,12 @@ void read_touch_task(void *args)
 void read_button_task(void *args)
 {
   for (;;) {
-    pthread_mutex_lock(&watch_mutex);
-    watch->power->clearIRQ();
-    pthread_mutex_unlock(&watch_mutex);
-
     if (xSemaphoreTake(button_semaphore, portMAX_DELAY) == pdTRUE) {
       pthread_mutex_lock(&watch_mutex);
 
       watch->power->readIRQ();
       bool is_long = watch->power->isPEKLongPressIRQ();
       bool is_short = watch->power->isPEKShortPressIRQ();
-      watch->power->clearIRQ();
-
-      pthread_mutex_unlock(&watch_mutex);
 
       if (is_short) {
         Event e = {BUTTON_UP_EVENT, 0, 0};
@@ -198,7 +191,10 @@ void read_button_task(void *args)
       else if (is_long) {
         Event e = {BUTTON_LONG_PRESS_EVENT, 0, 0};
         xQueueSendToBack(event_queue, (const void *) &e, (TickType_t) 0);
-      } 
+      }
+      
+      watch->power->clearIRQ();
+      pthread_mutex_unlock(&watch_mutex);
     }
   }
 }

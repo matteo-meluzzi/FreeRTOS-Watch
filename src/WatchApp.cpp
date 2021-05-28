@@ -50,6 +50,7 @@ void WatchApp::update() {
 
   watch->tft->setTextSize(2);
   watch->tft->setTextDatum(MC_DATUM);
+  watch->tft->drawString("            ", 120, 200); // clear previous string
   int percent = min(99, max(0, watch->power->getBattPercentage()));
   String percent_string = String(percent);
   String consumption = String(watch->power->getBattDischargeCurrent());

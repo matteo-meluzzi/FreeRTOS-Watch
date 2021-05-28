@@ -21,6 +21,7 @@ void PingPongApp::setup() {
   watch->tft->fillScreen(TFT_BLACK);
   watch->tft->setTextColor(TFT_WHITE, TFT_BLACK); // white text with black background
   watch->tft->setTextDatum(MC_DATUM); // the string should be in the middle
+  watch->tft->setTextSize(5);
 
   pthread_mutex_unlock(&watch_mutex);
 

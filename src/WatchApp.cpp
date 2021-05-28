@@ -45,6 +45,15 @@ void WatchApp::update() {
   watch->tft->println("");
   watch->tft->setTextSize(5);
   watch->tft->println(watch->rtc->formatDateTime(PCF_TIMEFORMAT_HMS));
+  watch->tft->println("");
+  watch->tft->println("");
+
+  watch->tft->setTextSize(2);
+  watch->tft->setTextDatum(MC_DATUM);
+  int percent = min(99, max(0, watch->power->getBattPercentage()));
+  String percent_string = String(percent);
+  String consumption = String(watch->power->getBattDischargeCurrent());
+  watch->tft->drawString(percent_string + "% " + consumption + "mA", 120, 200);
 
   pthread_mutex_unlock(&watch_mutex);
 }

@@ -125,7 +125,7 @@ void setup()
 
   // Initialize the hardware, the BMA423 sensor has been initialized internally
   watch->begin();
-  watch->bl->adjust(255);
+  watch->bl->adjust(64);
   watch->tft->setSwapBytes(true); // Swap the 2 bytes of an image which form a pixel
 
   // update_rtc_from_wifi();
@@ -146,6 +146,12 @@ void setup()
     xSemaphoreGiveFromISR(touch_semaphore, nullptr);
   }, CHANGE);
 
+  watch->power->adc1Enable(AXP202_VBUS_VOL_ADC1 |
+    AXP202_VBUS_CUR_ADC1 |
+    AXP202_BATT_CUR_ADC1 |
+    AXP202_BATT_VOL_ADC1,
+    true);
+  
   esp_timer_init();
   esp_timer_create_args_t args = {every_second, nullptr, ESP_TIMER_TASK, "one second timer"};
   ESP_ERROR_CHECK(esp_timer_create(&args, &one_second_timer));

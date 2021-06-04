@@ -11,6 +11,10 @@ extern TTGOClass *watch;
 extern pthread_mutex_t watch_mutex;
 extern void sleep_until_display_or_button_is_pressed();
 
+WatchApp::WatchApp(App *next_app): App(next_app) {
+  pthread_mutex_init(&this->steps_mutex, nullptr);
+}
+
 void WatchApp::setup() {
   pthread_mutex_lock(&watch_mutex);
 
@@ -21,18 +25,36 @@ void WatchApp::setup() {
   this->update();
 }
 
-void WatchApp::on_touch_down(uint16_t x, uint16_t y) {
+void WatchApp::on_touch_down(uint32_t x, uint32_t y) {
   // Serial.println("watch Touch Down");
 }
 
-void WatchApp::on_touch_up(uint16_t x, uint16_t y) {
+void WatchApp::on_touch_up(uint32_t x, uint32_t y) {
   // Serial.println("watch Touch Up");
   
   sleep_until_display_or_button_is_pressed();
 }
 
 void WatchApp::on_button_long_press() {
-  //Serial.println("watch Button long");
+  pthread_mutex_lock(&steps_mutex);
+  pthread_mutex_lock(&watch_mutex);
+
+  this->steps = 0;
+  watch->bma->resetStepCounter();
+  Serial.println("reset steps");
+
+  pthread_mutex_unlock(&watch_mutex);
+  pthread_mutex_unlock(&steps_mutex);
+
+  update();
+}
+
+void WatchApp::on_step_counter_counted(uint32_t steps) {
+  App::on_step_counter_counted(steps);
+  pthread_mutex_lock(&steps_mutex);
+  this->steps = steps;
+  pthread_mutex_unlock(&steps_mutex);
+  update();
 }
 
 void WatchApp::update() {
@@ -50,11 +72,17 @@ void WatchApp::update() {
 
   watch->tft->setTextSize(2);
   watch->tft->setTextDatum(MC_DATUM);
-  watch->tft->drawString("            ", 120, 200); // clear previous string
+
+  watch->tft->drawString("                  ", 120, 180);
+  pthread_mutex_lock(&steps_mutex);
+  watch->tft->drawString(String(this->steps) + " steps", 120, 180);
+  pthread_mutex_unlock(&steps_mutex);
+
+  watch->tft->drawString("            ", 120, 220); // clear previous string
   int percent = min(99, max(0, watch->power->getBattPercentage()));
   String percent_string = String(percent);
   String consumption = String(watch->power->getBattDischargeCurrent());
-  watch->tft->drawString(percent_string + "% " + consumption + "mA", 120, 200);
+  watch->tft->drawString(percent_string + "% " + consumption + "mA", 120, 220);
 
   pthread_mutex_unlock(&watch_mutex);
 }

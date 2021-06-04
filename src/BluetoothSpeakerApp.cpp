@@ -36,10 +36,10 @@ void BluetoothSpeakerApp::setup() {
 
     pthread_mutex_unlock(&audio_mutex);
 }
-void BluetoothSpeakerApp::on_touch_down(uint16_t x, uint16_t y) {
+void BluetoothSpeakerApp::on_touch_down(uint32_t x, uint32_t y) {
 
 }
-void BluetoothSpeakerApp::on_touch_up(uint16_t x, uint16_t y) {
+void BluetoothSpeakerApp::on_touch_up(uint32_t x, uint32_t y) {
 
 }
 void BluetoothSpeakerApp::on_button_up() {

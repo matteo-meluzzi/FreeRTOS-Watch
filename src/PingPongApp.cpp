@@ -79,7 +79,7 @@ void PingPongApp::set_score2(long score2) {
   draw_score2();
 }
 
-void PingPongApp::on_touch_down(uint16_t x, uint16_t y) {
+void PingPongApp::on_touch_down(uint32_t x, uint32_t y) {
   if (x < 120 && y < 120) set_score1(this->score1 - 1);
   else if (x < 120 && y >= 120) set_score2(this->score2 - 1);
   else if (x >= 120 && y < 120) {
@@ -92,7 +92,7 @@ void PingPongApp::on_touch_down(uint16_t x, uint16_t y) {
   }
 }
 
-void PingPongApp::on_touch_up(uint16_t x, uint16_t y) {
+void PingPongApp::on_touch_up(uint32_t x, uint32_t y) {
   // pthread_mutex_lock(&watch_mutex);
   // watch->tft->fillScreen(TFT_BLACK);
   // pthread_mutex_unlock(&watch_mutex);

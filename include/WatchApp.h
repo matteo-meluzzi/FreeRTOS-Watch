@@ -2,16 +2,22 @@
 #define WATCH_APP_H
 
 #include "App.h"
+#include <pthread.h>
 
 struct WatchApp : public App 
 {
-  WatchApp(App *next_app): App(next_app) {}
+  WatchApp(App *next_app);
 
   void setup();
-  void on_touch_down(uint16_t x, uint16_t y);
-  void on_touch_up(uint16_t x, uint16_t y);
+  void on_touch_down(uint32_t x, uint32_t y);
+  void on_touch_up(uint32_t x, uint32_t y);
   void on_button_long_press();
+  void on_step_counter_counted(uint32_t steps);
   void update();
+
+private:
+  uint32_t steps = 0;
+  pthread_mutex_t steps_mutex;
 };
 
 #endif

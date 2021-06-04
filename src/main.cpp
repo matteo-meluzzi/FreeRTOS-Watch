@@ -17,18 +17,20 @@ void wake_up();
 
 void read_button_task(void *args);
 void read_touch_task(void *args);
+void read_step_counter_task(void *args);
 
 typedef enum {
   TOUCH_DOWN_EVENT,
   TOUCH_UP_EVENT,
   BUTTON_UP_EVENT,
-  BUTTON_LONG_PRESS_EVENT
+  BUTTON_LONG_PRESS_EVENT,
+  STEP_COUNTER_EVENT
 } EventType;
 
 struct Event {
   EventType type;
-  uint16_t param1;
-  uint16_t param2;
+  uint32_t param1;
+  uint32_t param2;
 };
 
 TTGOClass *watch;
@@ -40,20 +42,16 @@ pthread_mutex_t audio_mutex;
 TickType_t last_woke_up_ticks = 0;
 
 SemaphoreHandle_t button_semaphore = NULL;
-
 SemaphoreHandle_t touch_semaphore = NULL;
+SemaphoreHandle_t step_counter_semaphore = NULL;
 
 QueueHandle_t event_queue = NULL;
 
 App *current_app;
 
-extern PingPongApp ping_pong_app;
-extern WatchApp watch_app;
-extern BluetoothSpeakerApp speaker_app;
-
-WatchApp watch_app = {&ping_pong_app};
-PingPongApp ping_pong_app = {&speaker_app};
-BluetoothSpeakerApp speaker_app = {&watch_app};
+WatchApp watch_app = NULL;
+PingPongApp ping_pong_app = NULL;
+BluetoothSpeakerApp speaker_app = NULL;
 
 void set_current_app(App *new_app) {
   current_app = new_app;
@@ -65,7 +63,7 @@ void every_second(void *arg) {
   current_app->update();
 }
 
-const char *ssid            = "Saettanet";
+const char *ssid            = "room 12.4 rules";
 const char *password        = "cocongo72";
 
 const char *ntpServer       = "pool.ntp.org";
@@ -105,6 +103,9 @@ void update_rtc_from_wifi() {
 
 void setup()
 {
+  Serial.begin(115200);
+  Serial.println("Hi!");
+
   ESP_ERROR_CHECK(pthread_mutex_init(&watch_mutex, NULL));
   ESP_ERROR_CHECK(pthread_mutex_init(&audio_mutex, NULL));
 
@@ -112,23 +113,26 @@ void setup()
   assert(button_semaphore);
   touch_semaphore = xSemaphoreCreateCounting(1024, 0);
   assert(touch_semaphore);
+  step_counter_semaphore = xSemaphoreCreateCounting(1024, 0);
+  assert(step_counter_semaphore);
   event_queue = xQueueCreate(25, sizeof(Event));
   assert(event_queue);
 
+  watch_app = WatchApp(&ping_pong_app);
+  ping_pong_app = PingPongApp(&speaker_app);
+  speaker_app = BluetoothSpeakerApp(&watch_app);
+
   current_app = &watch_app;
   assert(current_app);
-
-  Serial.begin(115200);
-  Serial.println("Hi!");
 
   watch = TTGOClass::getWatch();
 
   // Initialize the hardware, the BMA423 sensor has been initialized internally
   watch->begin();
-  watch->bl->adjust(64);
+  watch->bl->adjust(32);
   watch->tft->setSwapBytes(true); // Swap the 2 bytes of an image which form a pixel
 
-  // update_rtc_from_wifi();
+  update_rtc_from_wifi();
 
   pinMode(AXP202_INT, INPUT_PULLUP);
   attachInterrupt(AXP202_INT, [] {
@@ -152,6 +156,17 @@ void setup()
     AXP202_BATT_VOL_ADC1,
     true);
   
+  Acfg cfg = {BMA4_OUTPUT_DATA_RATE_25HZ, BMA4_ACCEL_RANGE_2G, BMA4_ACCEL_NORMAL_AVG4, BMA4_CONTINUOUS_MODE};
+  watch->bma->accelConfig(cfg);
+  watch->bma->enableAccel();
+  pinMode(BMA423_INT1, INPUT);
+  attachInterrupt(BMA423_INT1, [] {
+    xSemaphoreGiveFromISR(step_counter_semaphore, nullptr);
+  }, RISING);
+  watch->bma->enableFeature(BMA423_STEP_CNTR, true);
+  watch->bma->resetStepCounter();
+  watch->bma->enableStepCountInterrupt();
+
   esp_timer_init();
   esp_timer_create_args_t args = {every_second, nullptr, ESP_TIMER_TASK, "one second timer"};
   ESP_ERROR_CHECK(esp_timer_create(&args, &one_second_timer));
@@ -159,6 +174,7 @@ void setup()
 
   xTaskCreate(read_button_task, "read_button_task", 2048, NULL, 1, NULL);
   xTaskCreate(read_touch_task, "read_touch_task", 2048, NULL, 1, NULL);
+  xTaskCreate(read_step_counter_task, "read_step_counter_task", 2048, NULL, 1, NULL);
 }
 
 void read_touch_task(void *args)
@@ -203,6 +219,29 @@ void read_button_task(void *args)
   }
 }
 
+void read_step_counter_task(void *args) 
+{
+  for (;;) {
+    if (xSemaphoreTake(step_counter_semaphore, portMAX_DELAY) == pdTRUE) {
+      pthread_mutex_lock(&watch_mutex);
+
+      if (!watch->bma->readInterrupt()) continue;
+
+      // Check if it is a step interrupt
+      if (watch->bma->isStepCounter()) {
+        Serial.println("Step count ");
+        Serial.println(watch->bma->getCounter());
+        // Get step data from register
+        uint32_t steps = watch->bma->getCounter();
+        Event e = {STEP_COUNTER_EVENT, steps, 0};
+        xQueueSendToBack(event_queue, (const void *) &e, (TickType_t) 0);
+      }
+
+      pthread_mutex_unlock(&watch_mutex);
+    }
+  }
+}
+
 void loop()
 {
   // Serial.println("loop");
@@ -225,6 +264,9 @@ void loop()
         break;
       case BUTTON_LONG_PRESS_EVENT:
         current_app->on_button_long_press();
+        break;
+      case STEP_COUNTER_EVENT:
+        current_app->on_step_counter_counted(event.param1);
         break;
       default:
         break;

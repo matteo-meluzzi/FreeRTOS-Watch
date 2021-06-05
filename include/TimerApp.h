@@ -3,6 +3,12 @@
 
 #include "App.h"
 
+
+class AudioFileSourcePROGMEM;
+class AudioGeneratorWAV;
+class AudioOutputI2S;
+class TTGOClass;
+
 struct TimerApp: public App {
   TimerApp(App *next_app): App(next_app) {};
 
@@ -13,6 +19,10 @@ struct TimerApp: public App {
   void on_button_long_press();
   void on_step_counter_counted(uint32_t steps);
   void update();
+private:
+  AudioFileSourcePROGMEM *file;
+  AudioGeneratorWAV *generator;
+  AudioOutputI2S *out;
 };
 
 #endif

@@ -1,4 +1,3 @@
-#include "PingPongApp.h"
 #include "WatchApp.h"
 
 #include <pthread.h>
@@ -78,7 +77,7 @@ void WatchApp::update() {
   watch->tft->drawString(String(this->steps) + " steps", 120, 180);
   pthread_mutex_unlock(&steps_mutex);
 
-  watch->tft->drawString("            ", 120, 220); // clear previous string
+  watch->tft->drawString("                  ", 120, 220); // clear previous string
   int percent = min(99, max(0, watch->power->getBattPercentage()));
   String percent_string = String(percent);
   String consumption = String(watch->power->getBattDischargeCurrent());

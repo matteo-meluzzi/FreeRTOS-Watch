@@ -8,6 +8,7 @@
 #include <btAudio.h>
 
 #include "WatchApp.h"
+#include "TimerApp.h"
 #include "PingPongApp.h"
 #include "BluetoothSpeakerApp.h"
 
@@ -50,11 +51,15 @@ QueueHandle_t event_queue = NULL;
 App *current_app;
 
 WatchApp watch_app = NULL;
+TimerApp timer_app = NULL;
 PingPongApp ping_pong_app = NULL;
 BluetoothSpeakerApp speaker_app = NULL;
 
 void set_current_app(App *new_app) {
   current_app = new_app;
+  pthread_mutex_lock(&watch_mutex);
+  watch->motor->onec(100); // does not wait until motor ends
+  pthread_mutex_unlock(&watch_mutex);
   current_app->setup();
 }
 
@@ -118,8 +123,9 @@ void setup()
   event_queue = xQueueCreate(25, sizeof(Event));
   assert(event_queue);
 
-  watch_app = WatchApp(&ping_pong_app);
-  ping_pong_app = PingPongApp(&speaker_app);
+  watch_app = WatchApp(&timer_app);
+  timer_app = TimerApp(&ping_pong_app);
+  ping_pong_app = PingPongApp(&watch_app);
   speaker_app = BluetoothSpeakerApp(&watch_app);
 
   current_app = &watch_app;
@@ -131,8 +137,9 @@ void setup()
   watch->begin();
   watch->bl->adjust(32);
   watch->tft->setSwapBytes(true); // Swap the 2 bytes of an image which form a pixel
+  watch->motor_begin();
 
-  update_rtc_from_wifi();
+  // update_rtc_from_wifi();
 
   pinMode(AXP202_INT, INPUT_PULLUP);
   attachInterrupt(AXP202_INT, [] {
@@ -175,6 +182,9 @@ void setup()
   xTaskCreate(read_button_task, "read_button_task", 2048, NULL, 1, NULL);
   xTaskCreate(read_touch_task, "read_touch_task", 2048, NULL, 1, NULL);
   xTaskCreate(read_step_counter_task, "read_step_counter_task", 2048, NULL, 1, NULL);
+
+  wake_up();
+  current_app->setup();
 }
 
 void read_touch_task(void *args)
@@ -245,8 +255,6 @@ void read_step_counter_task(void *args)
 void loop()
 {
   // Serial.println("loop");
-  wake_up();
-
   for (;;) {
     Event event;
 
@@ -280,8 +288,6 @@ void wake_up() {
   watch->tft->begin();
   watch->openBL();
   pthread_mutex_unlock(&watch_mutex);
-
-  current_app->setup();
 
   last_woke_up_ticks = xTaskGetTickCount();
 }

@@ -184,7 +184,6 @@ void setup()
   xTaskCreate(read_step_counter_task, "read_step_counter_task", 2048, NULL, 1, NULL);
 
   wake_up();
-  current_app->setup();
 }
 
 void read_touch_task(void *args)
@@ -289,6 +288,8 @@ void wake_up() {
   watch->tft->begin();
   watch->openBL();
   pthread_mutex_unlock(&watch_mutex);
+
+  current_app->update();
 
   last_woke_up_ticks = xTaskGetTickCount();
 }

@@ -223,6 +223,7 @@ void read_button_task(void *args)
         Event e = {BUTTON_LONG_PRESS_EVENT, 0, 0};
         xQueueSendToBack(event_queue, (const void *) &e, (TickType_t) 0);
       }
+      vTaskDelay(100 / portTICK_PERIOD_MS); // wait 100 ms before clearing the power IRQ and accepting the next button press.
       watch->power->clearIRQ();
       pthread_mutex_unlock(&watch_mutex);
     }

@@ -3,6 +3,8 @@
 
 #include "App.h"
 
+#include <pthread.h>
+#include <esp_timer.h>
 
 class AudioFileSourcePROGMEM;
 class AudioGeneratorWAV;
@@ -19,10 +21,12 @@ struct TimerApp: public App {
   void on_button_long_press();
   void on_step_counter_counted(uint32_t steps);
   void update();
-private:
+
   AudioFileSourcePROGMEM *file;
   AudioGeneratorWAV *generator;
+  pthread_mutex_t generator_mutex;
   AudioOutputI2S *out;
+  esp_timer_handle_t loop_audio_timer;
 };
 
 #endif

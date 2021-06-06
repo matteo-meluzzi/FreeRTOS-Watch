@@ -1,7 +1,5 @@
 #include "TimerApp.h"
 
-#include <pthread.h>
-
 #include "matteo-watch.h"
 #include <LilyGoWatch.h>
 #include <TTGO.h>
@@ -16,12 +14,15 @@
 extern TTGOClass *watch;
 extern pthread_mutex_t watch_mutex;
 
-esp_timer_handle_t loop_audio_timer;
-void loop_audio(void *generator_void) {
-    AudioGenerator *generator = static_cast<AudioGenerator *>(generator_void);
+void loop_audio(void *timer_app_void) {    
+    TimerApp *timer_app = static_cast<TimerApp *>(timer_app_void);
+    
+    pthread_mutex_lock(&timer_app->generator_mutex);
+    AudioGenerator *generator = timer_app->generator;
     if (generator->isRunning()) {
         if (!generator->loop()) generator->stop();
     }
+    pthread_mutex_unlock(&timer_app->generator_mutex);
 }
 
 void TimerApp::setup() {
@@ -42,7 +43,7 @@ void TimerApp::setup() {
     generator = new AudioGeneratorWAV();
     generator->begin(file, out);
 
-    esp_timer_create_args_t args = {loop_audio, generator, ESP_TIMER_TASK, "play sound timer"};
+    esp_timer_create_args_t args = {loop_audio, this, ESP_TIMER_TASK, "play sound timer"};
     ESP_ERROR_CHECK(esp_timer_create(&args, &loop_audio_timer));
     ESP_ERROR_CHECK(esp_timer_start_periodic(loop_audio_timer, 90)); // 90 microseconds ~= 11111 Hz
 }
@@ -55,12 +56,14 @@ void TimerApp::on_touch_up(uint32_t x, uint32_t y) {
 }
 
 void TimerApp::on_button_up() {
+    pthread_mutex_lock(&generator_mutex);
     esp_timer_stop(loop_audio_timer);
     esp_timer_delete(loop_audio_timer);
     generator->stop();
     delete out;
     delete generator;
     delete file;
+    pthread_mutex_unlock(&generator_mutex);
 
     App::on_button_up();
 }
